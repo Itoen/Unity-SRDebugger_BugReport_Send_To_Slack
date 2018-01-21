@@ -8,10 +8,10 @@
 # 使い方
 1. SRDebuggerをインポート済みのプロジェクトにこのプロジェクトを追加して下さい。
 2. `StompyRobot/SRDebugger/Scripts/Services/Implementation/BugReportApiService.cs`を編集して下さい。
-> private BugReportApi _reportApi;
-> ↓
-> private MyBugReportApi _reportApi;
-
-> _reportApi = new BugReportApi(report, Settings.Instance.ApiKey);
-> ↓
-> _reportApi = new MyBugReportApi(report, Settings.Instance.ApiKey);
+> private BugReportApi _reportApi;  
+> ↓  
+> private MyBugReportApi _reportApi;  
+　  
+> _reportApi = new BugReportApi(report, Settings.Instance.ApiKey);  
+> ↓  
+> _reportApi = new MyBugReportApi(report, Settings.Instance.ApiKey);  
