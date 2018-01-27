@@ -7,11 +7,5 @@
 
 # 使い方
 1. SRDebuggerをインポート済みのプロジェクトにこのプロジェクトを追加して下さい。
-2. `StompyRobot/SRDebugger/Scripts/Services/Implementation/BugReportApiService.cs`を編集して下さい。
-> private BugReportApi _reportApi;  
-> ↓  
-> private MyBugReportApi _reportApi;  
-　  
-> _reportApi = new BugReportApi(report, Settings.Instance.ApiKey);  
-> ↓  
-> _reportApi = new MyBugReportApi(report, Settings.Instance.ApiKey);  
+1. `SRBugReportSendToSlack/SlackAPISetting.cs`にAPIトークンなどを入力して下さい。
+1. `SRBugReportSendToSlack/Prefabs/SRBugReportSendToSlack.prefab`をシーン上に配置して下さい。
