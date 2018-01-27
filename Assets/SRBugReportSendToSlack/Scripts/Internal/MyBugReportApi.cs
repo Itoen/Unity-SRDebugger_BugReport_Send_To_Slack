@@ -12,11 +12,15 @@ namespace SRDebugger.Internal
     using Services;
     using SRF;
     using UnityEngine;
+    using SRBugReportSendToSlack;
 
     public class MyBugReportApi
     {
         #region Enums
 
+        /// <summary>
+        /// レポート種別
+        /// </summary>
         public enum ReportType : int
         {
             ScreenShot = 0,
@@ -33,12 +37,6 @@ namespace SRDebugger.Internal
         /// </summary>
         private static readonly string SlackApiUrl = "https://slack.com/api";
         private static readonly string UploadEndPoint = "/files.upload";
-        /// @note attachment上手行かない。。。
-        //private static readonly string PostMessageEndPoint = "/chat.postMessage";
-        private static readonly string AccessToken = "YourToken";
-        private static readonly string WebHookUrl = "https://hooks.slack.com/services/Txxxxxxxx/Bxxxxxxx/xxxxxxxxx";
-        private static readonly string Channels = "general";
-        private static readonly string UserName = "SRDebuggerBugReport";
 
         /// <summary>
         /// Attachmentのカラー
@@ -52,11 +50,22 @@ namespace SRDebugger.Internal
         private static readonly string WarningLogColor = "#FFD700";
         private static readonly string NormalLogColor = "#708090";
 
+        /// <summary>
+        /// textファイルアップロード時の実行メソッド
+        /// </summary>
+        private static Func<BugReport, WWWForm>[] textFileUploadMethods =
+        {
+            BuildScrrenShotUploadRequest,
+            BuildAllReportTextRequest,
+        };
+
         #endregion // Constants
 
         #region Variables
 
+#pragma warning disable 414
         private readonly string _apiKey;
+#pragma warning restore 414
         private readonly BugReport _bugReport;
         private bool _isBusy;
         private WWW _www;
@@ -114,6 +123,20 @@ namespace SRDebugger.Internal
             _www = null;
             _logId = (uint)System.Security.Cryptography.MD5.Create().GetHashCode();
 
+            switch (SlackAPISetting.sendType)
+            {
+                case SendTypes.TextFile:
+                    yield return this.SubmitTextFile();
+                    break;
+
+                default:
+                    yield return this.SubmitPlaneReport();
+                    break;
+            }
+        }
+
+        private IEnumerator SubmitPlaneReport ()
+        {
             foreach (var type in Enum.GetValues(typeof(ReportType)))
             {
                 try
@@ -136,7 +159,7 @@ namespace SRDebugger.Internal
                         headers["Method"] = "POST";
                         headers["data"] = json;
 
-                        _www = new WWW(WebHookUrl, jsonBytes, headers);
+                        _www = new WWW(SlackAPISetting.WebHookUrl, jsonBytes, headers);
                     }
 
                 }
@@ -145,6 +168,59 @@ namespace SRDebugger.Internal
                     ErrorMessage = e.Message;
                 }
 
+                if (_www == null)
+                {
+                    SetCompletionState(false);
+                    yield break;
+                }
+
+                yield return _www;
+
+                if (!string.IsNullOrEmpty(_www.error))
+                {
+                    ErrorMessage = _www.error;
+                    SetCompletionState(false);
+
+                    yield break;
+                }
+
+                if (!_www.responseHeaders.ContainsKey("STATUS"))
+                {
+                    ErrorMessage = "Completion State Unknown";
+                    SetCompletionState(false);
+                    yield break;
+                }
+
+                var status = _www.responseHeaders["STATUS"];
+
+                if (!status.Contains("200"))
+                {
+                    ErrorMessage = SRDebugApiUtil.ParseErrorResponse(_www.text, status);
+                    SetCompletionState(false);
+
+                    yield break;
+                }
+            }
+
+            SetCompletionState(true);
+        }
+
+        private IEnumerator SubmitTextFile ()
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                try
+                {
+                    var form = textFileUploadMethods[i].Invoke(_bugReport);
+                    var url = SlackApiUrl + UploadEndPoint;
+
+                    _www = new WWW(url, form);
+
+                }
+                catch (Exception e)
+                {
+                    ErrorMessage = e.Message;
+                }
                 if (_www == null)
                 {
                     SetCompletionState(false);
@@ -199,9 +275,9 @@ namespace SRDebugger.Internal
         {
             var form = new WWWForm();
 
-            form.AddField("token", AccessToken);
-            form.AddField("channels", Channels);
-            form.AddField("username", UserName);
+            form.AddField("token", SlackAPISetting.AccessToken);
+            form.AddField("channels", SlackAPISetting.Channels);
+            form.AddField("username", SlackAPISetting.UserName);
             var title = string.Format("ScreenShot ({0})", _logId);
             form.AddField("title", title);
             form.AddBinaryData("file", report.ScreenshotData, "screenShot", "imag/png");
@@ -233,12 +309,11 @@ namespace SRDebugger.Internal
         static string BuildSystemInfoJsonRequest (BugReport report)
         {
             var ht = new Hashtable();
-            ht.Add("username", UserName);
+            ht.Add("username", SlackAPISetting.UserName);
             var messageTitle = string.Format("SystemInfo ({0})", _logId);
             ht.Add("text", messageTitle);
 
             List<Hashtable> attachmentList = new List<Hashtable>();
-            List<Hashtable> systemInfoList = new List<Hashtable>();
             foreach (var systemInfos in report.SystemInformation)
             {
                 var systemInfoHashTable = new Hashtable();
@@ -264,7 +339,7 @@ namespace SRDebugger.Internal
         private static string BuildConsoleLogJsonRequest (BugReport report)
         {
             var ht = new Hashtable();
-            ht.Add("username", UserName);
+            ht.Add("username", SlackAPISetting.UserName);
             var messageTitle = string.Format("Console ({0})", _logId);
             ht.Add("text", messageTitle);
 
@@ -308,6 +383,58 @@ namespace SRDebugger.Internal
             var json = Json.Serialize(ht);
 
             return json;
+        }
+
+        private static WWWForm BuildAllReportTextRequest (BugReport report)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(string.Format("BugReport<{0}>", _logId));
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("--------------Description-------------------");
+            sb.AppendLine(report.UserDescription);
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("--------------SystemInfo-------------------");
+            foreach (var systemInfos in report.SystemInformation)
+            {
+                sb.AppendLine(string.Format("■{0}", systemInfos.Key));
+                foreach (var obj in systemInfos.Value)
+                {
+                    sb.AppendLine(obj.ToString());
+                }
+                sb.AppendLine();
+            }
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("--------------Console-------------------");
+            foreach (var logs in CreateConsoleDump())
+            {
+                // LogType + Log
+                var title = logs[0] + " : " + logs[1];
+                sb.AppendLine(string.Format("- {0}", title));
+                // StackTrace
+                for (int i = 2; i < logs.Count; i++)
+                {
+                    sb.Append(logs[i]);
+                }
+                sb.AppendLine();
+            }
+            sb.AppendLine();
+            sb.AppendLine();
+
+            var textData = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+
+            var form = new WWWForm();
+
+            form.AddField("token", SlackAPISetting.AccessToken);
+            form.AddField("channels", SlackAPISetting.Channels);
+            form.AddField("username", SlackAPISetting.UserName);
+            var fileTitle = string.Format("BugReport ({0}).txt", _logId);
+            form.AddField("title", fileTitle);
+            form.AddBinaryData("file", textData, "BugReport.txt", "text");
+
+            return form;
         }
 
         private static IList<IList<string>> CreateConsoleDump ()
