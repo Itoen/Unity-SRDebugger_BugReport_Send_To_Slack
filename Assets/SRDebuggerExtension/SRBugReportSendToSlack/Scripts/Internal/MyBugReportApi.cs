@@ -13,7 +13,7 @@ namespace SRDebugger.Internal
     using SRF;
     using UnityEngine;
 
-    public class ItoenBugReportApi
+    public class MyBugReportApi
     {
         #region Enums
 
@@ -71,7 +71,7 @@ namespace SRDebugger.Internal
 
         #region Constructor
 
-        public ItoenBugReportApi(BugReport report, string apiKey)
+        public MyBugReportApi(BugReport report, string apiKey)
         {
             _bugReport = report;
         }
