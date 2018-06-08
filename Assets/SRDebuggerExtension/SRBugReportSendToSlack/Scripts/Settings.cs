@@ -16,5 +16,5 @@ public static class PostModeSetting
         TextFile,
     }
 
-    public static readonly PostModes PostMode = PostModes.Plane;
+    public static readonly PostModes PostMode = PostModes.TextFile;
 }
