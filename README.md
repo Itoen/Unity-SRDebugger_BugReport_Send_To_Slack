@@ -20,3 +20,6 @@ MIT
 ### Plane Modeで使用する場合  
 1.https://bugreporttest.slack.com/apps/A0F7XDUAZ-incoming-webhook でWebHook URLを取得して下さい。  
 1.`SRBugReportSendToSlack/Settings.cs`のWebHookUrlに取得したURLを設定して下さい。  
+
+# Release Page
+https://github.com/Itoen/Unity-SRDebugger_BugReport_Send_To_Slack/releases/
