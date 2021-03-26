@@ -1,4 +1,6 @@
 ﻿
+using UnityEngine.Networking;
+
 #if NETFX_CORE
 using UnityEngine.Windows;
 #endif
@@ -35,6 +37,7 @@ namespace SRDebugger.Internal
         private static readonly string UploadEndPoint = "/files.upload";
         /// @note Hookじゃ無いとattachment上手行かない。。。
         //private static readonly string PostMessageEndPoint = "/chat.postMessage";
+        private static readonly string PostMessageEndPoint = "/chat.postMessage";
         private static readonly string UserName = "SRDebuggerBugReport";
 
         /// <summary>
@@ -64,7 +67,7 @@ namespace SRDebugger.Internal
 
         private readonly BugReport _bugReport;
         private bool _isBusy;
-        private WWW _www;
+        private UnityWebRequest _webRequest;
         private static uint _logId;
 
         #endregion // Variables
@@ -88,12 +91,12 @@ namespace SRDebugger.Internal
         {
             get
             {
-                if (_www == null)
+                if (_webRequest == null)
                 {
                     return 0;
                 }
 
-                return Mathf.Clamp01(_www.progress + _www.uploadProgress);
+                return Mathf.Clamp01(_webRequest.downloadProgress + _webRequest.uploadProgress);
             }
         }
 
@@ -115,7 +118,7 @@ namespace SRDebugger.Internal
             ErrorMessage = "";
             IsComplete = false;
             WasSuccessful = false;
-            _www = null;
+            _webRequest = null;
             _logId = (uint)System.Security.Cryptography.MD5.Create().GetHashCode();
 
             IEnumerator enumerator = null;
@@ -143,57 +146,54 @@ namespace SRDebugger.Internal
                     {
                         var form = BuildScrrenShotUploadRequest(_bugReport);
                         var url = SlackApiUrl + UploadEndPoint;
-
-                        _www = new WWW(url, form);
+                        _webRequest = UnityWebRequest.Post(url, form);
                     }
                     else
                     {
+                        _webRequest = new UnityWebRequest(SlackAPISetting.WebHookUrl, "POST");
+                        _webRequest.SetRequestHeader("Content-type", "application/json");
+                        
                         string json = BuildJsonRequest((int)type, _bugReport);
-
-                        var jsonBytes = Encoding.UTF8.GetBytes(json);
-                        var headers = new Dictionary<string, string>();
-                        headers["Content-type"] = "application/json";
-                        headers["Accept"] = "application/json";
-                        headers["Method"] = "POST";
-                        headers["data"] = json;
-
-                        _www = new WWW(SlackAPISetting.WebHookUrl, jsonBytes, headers);
+                        var jsonData = Encoding.UTF8.GetBytes(json);
+                        _webRequest.uploadHandler = new UploadHandlerRaw(jsonData);
                     }
 
+                    _webRequest.SendWebRequest();
                 }
                 catch (Exception e)
                 {
                     ErrorMessage = e.Message;
                 }
 
-                if (_www == null)
+                if (_webRequest == null)
                 {
                     SetCompletionState(false);
                     yield break;
                 }
 
-                yield return _www;
-
-                if (!string.IsNullOrEmpty(_www.error))
+                while (!_webRequest.isDone)
                 {
-                    ErrorMessage = _www.error;
+                    yield return null;
+                }
+
+                if (_webRequest.isHttpError || _webRequest.isNetworkError)
+                {
+                    ErrorMessage = _webRequest.error;
                     SetCompletionState(false);
 
                     yield break;
                 }
 
-                if (!_www.responseHeaders.ContainsKey("STATUS"))
+                if (_webRequest.responseCode == 0)
                 {
                     ErrorMessage = "Completion State Unknown";
                     SetCompletionState(false);
                     yield break;
                 }
 
-                var status = _www.responseHeaders["STATUS"];
-
-                if (!status.Contains("200"))
+                if (_webRequest.responseCode != 200 )
                 {
-                    ErrorMessage = SRDebugApiUtil.ParseErrorResponse(_www.text, status);
+                    ErrorMessage = SRDebugApiUtil.ParseErrorResponse(_webRequest.downloadHandler.text, _webRequest.responseCode.ToString());
                     SetCompletionState(false);
 
                     yield break;
@@ -212,42 +212,50 @@ namespace SRDebugger.Internal
                 {
                     var form = textFileUploadMethods[i].Invoke(_bugReport);
                     var url = SlackApiUrl + UploadEndPoint;
-
-                    _www = new WWW(url, form);
-
+                    
+                    _webRequest = UnityWebRequest.Post(url, form);
+                    _webRequest.SendWebRequest();
                 }
                 catch (Exception e)
                 {
                     ErrorMessage = e.Message;
                 }
-                if (_www == null)
+                if (_webRequest == null)
                 {
                     SetCompletionState(false);
                     yield break;
                 }
 
-                yield return _www;
-
-                if (!string.IsNullOrEmpty(_www.error))
+                while (!_webRequest.isDone)
                 {
-                    ErrorMessage = _www.error;
+                    yield return null;
+                }
+
+                if (!string.IsNullOrEmpty(_webRequest.error))
+                {
+                    ErrorMessage = _webRequest.error;
                     SetCompletionState(false);
 
                     yield break;
                 }
 
-                if (!_www.responseHeaders.ContainsKey("STATUS"))
+                if (_webRequest.isHttpError || _webRequest.isNetworkError)
                 {
                     ErrorMessage = "Completion State Unknown";
                     SetCompletionState(false);
                     yield break;
                 }
 
-                var status = _www.responseHeaders["STATUS"];
-
-                if (!status.Contains("200"))
+                if (_webRequest.responseCode == 0)
                 {
-                    ErrorMessage = SRDebugApiUtil.ParseErrorResponse(_www.text, status);
+                    ErrorMessage = "Completion State Unknown";
+                    SetCompletionState(false);
+                    yield break;
+                }
+                
+                if (_webRequest.responseCode != 200 )
+                {
+                    ErrorMessage = SRDebugApiUtil.ParseErrorResponse(_webRequest.downloadHandler.text, _webRequest.responseCode.ToString());
                     SetCompletionState(false);
 
                     yield break;
@@ -275,7 +283,7 @@ namespace SRDebugger.Internal
             var form = new WWWForm();
 
             form.AddField("token", SlackAPISetting.AccessToken);
-            form.AddField("channels", SlackAPISetting.Channels);
+            form.AddField("channels", SlackAPISetting.ChannelsID);
             form.AddField("username", UserName);
             var title = string.Format("ScreenShot ({0})", _logId);
             form.AddField("title", title);
@@ -317,8 +325,10 @@ namespace SRDebugger.Internal
             {
                 var systemInfoHashTable = new Hashtable();
                 systemInfoHashTable.Add("color", SystemInfoColor);
-                systemInfoHashTable.Add("title", systemInfos.Key);
+                
                 var sb = new StringBuilder();
+
+                sb.AppendLine(systemInfos.Key);
                 foreach (var obj in systemInfos.Value)
                 {
                     sb.AppendLine(obj.ToString());
@@ -366,7 +376,9 @@ namespace SRDebugger.Internal
 
                 // LogType + Log
                 var title = logs[0] + " : " + logs[1];
-                consoleHashTable.Add("title", title);
+                sb.Append(title);
+                sb.AppendLine();
+                
                 // StackTrace
                 for (int i = 2; i < logs.Count; i++)
                 {
@@ -423,13 +435,13 @@ namespace SRDebugger.Internal
             }
             sb.AppendLine();
             sb.AppendLine();
-
+            
             var textData = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
 
             var form = new WWWForm();
 
             form.AddField("token", SlackAPISetting.AccessToken);
-            form.AddField("channels", SlackAPISetting.Channels);
+            form.AddField("channels", SlackAPISetting.ChannelsID);
             var fileTitle = string.Format("BugReport ({0})", _logId);
             form.AddField("title", fileTitle);
             form.AddBinaryData("file", textData, fileTitle + ".txt", "text");

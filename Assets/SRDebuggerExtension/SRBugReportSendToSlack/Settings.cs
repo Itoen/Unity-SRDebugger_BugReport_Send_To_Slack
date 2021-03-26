@@ -1,9 +1,9 @@
 ﻿public static class SlackAPISetting
 {
     public static readonly string AccessToken = "YourSlackAPIToken";
-
-    public static readonly string Channels = "PostChannelName";
-
+    
+    public static readonly string ChannelsID = "PostChannelID";
+    
     /// PlaneMode Only
     public static readonly string WebHookUrl = "https://hooks.slack.com/services/Txxxxxxxx/Bxxxxxxx/xxxxxxxxx";
 }
